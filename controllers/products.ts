@@ -1,206 +1,110 @@
-import { Client } from "https://deno.land/x/postgres/mod.ts";
-import { Product } from '../types.ts'
-import { dbCreds } from '../config.ts'
+import { Product } from "../types/product.ts";
+import { Body, RouterContext } from "https://deno.land/x/oak/mod.ts";
 
-// Init client
-const client = new Client(dbCreds)
+const text = await Deno.readTextFile("data/products.json");
+let products: Product[] = JSON.parse(text);
 
-// @desc    Get all products
-// @route   GET /api/v1/products
-const getProducts = async ({ response }: { response: any }) => {
-    try {
-        await client.connect()
+// @description Get all products
+// @route GET /api/v1/products
+const getProducts = ({ response }: RouterContext) => {
+  response.body = {
+    success: true,
+    data: products,
+  };
+};
 
-        const result = await client.query("SELECT * FROM products")
+// @description Get one product
+// @route GET /api/v1/product/:id
+const getProduct = ({ response, params }: RouterContext) => {
+  const { id } = params;
+  const product = products.find((p) => p.id == id);
 
-        const products = new Array()
+  if (!product) {
+    response.status = 404;
+    response.body = {
+      success: false,
+      msg: "No product found",
+    };
+    return;
+  }
 
-        result.rows.map(p => {
-            let obj: any = new Object()
+  response.body = {
+    success: true,
+    data: product,
+  };
+};
 
-            result.rowDescription.columns.map((el, i) => {
-                obj[el.name] = p[i]
-            })
+// @description Create one product
+// @route POST /api/v1/product
+const addProduct = async ({ response, request }: RouterContext) => {
+  const payload: Body = await request.body();
 
-            products.push(obj)
-        })
+  if (!request.hasBody) {
+    response.status = 400;
+    response.body = {
+      success: false,
+      msg: "No data",
+    };
+  } else {
+    const product: Product = await payload.value;
+    const id = globalThis.crypto.randomUUID();
+    const newProduct = { ...product, id };
+    products.push(newProduct);
+    response.status = 201;
+    response.body = {
+      success: true,
+      data: newProduct,
+    };
+  }
+};
 
-        response.body = {
-            success: true,
-            data: products
-        }
-    } catch (err) {
-        response.status = 500
-        response.body = {
-            success: false,
-            msg: err.toString()
-        }
-    } finally {
-        await client.end()
-    }
-}
+// @description Update one product
+// @route PUT /api/v1/product/:id
+const updateProduct = async ({ response, request, params }: RouterContext) => {
+  const payload: Body = await request.body();
+  const { id } = params;
+  const product = products.find((p) => p.id === id);
 
-// @desc    Get single product
-// @route   GET /api/v1/products/:id
-const getProduct = async ({ params, response }: { params: { id: string }, response: any }) => {
-    try {
-        await client.connect()
+  if (!product) {
+    response.status = 404;
+    response.body = {
+      success: false,
+      msg: "Product not found",
+    };
+  } else if (!request.hasBody) {
+    response.status = 400;
+    response.body = {
+      success: false,
+      msg: "No data",
+    };
+  } else {
+    const values: { name?: string; description?: string; price?: number } =
+      await payload.value;
+    products = products.map((p) => p.id === id ? { ...p, ...values } : p);
+    response.status = 201;
+    response.body = {
+      success: true,
+      data: products,
+    };
+  }
+};
 
-        const result = await client.query("SELECT * FROM products WHERE id = $1", params.id)
+// @description Update one product
+// @route DELETE /api/v1/product/:id
+const deleteProduct = ({ response, params }: RouterContext) => {
+  const { id } = params;
+  products = products.filter((p) => p.id !== id);
+  response.status = 201;
+  response.body = {
+    success: true,
+    data: products,
+  };
+};
 
-        if(result.rows.toString() === "") {
-            response.status = 404
-            response.body = {
-                success: false,
-                msg: `No product with the id of ${params.id}`
-            }
-            return;
-        } else {
-            const product: any = new Object()
-
-            result.rows.map(p => {
-                result.rowDescription.columns.map((el, i) => {
-                    product[el.name] = p[i]
-                })
-            })
-
-            response.body = {
-                success: true,
-                data: product
-            }
-        }
-    } catch (err) {
-        response.status = 500
-        response.body = {
-            success: false,
-            msg: err.toString()
-        }
-    } finally {
-        await client.end()
-    }
-}
-
-// @desc    Add product
-// @route   Post /api/v1/products
-const addProduct = async ({ request, response }: { request: any, response: any }) => {    
-    const body = await request.body()
-    const product = body.value 
-
-    if (!request.hasBody) {
-        response.status = 400
-        response.body = {
-            success: false,
-            msg: 'No data'
-        }
-    } else {
-        try {
-            await client.connect()
-
-            const result = await client.query("INSERT INTO products(name,description,price) VALUES($1,$2,$3)", 
-            product.name, 
-            product.description, 
-            product.price)
-
-            response.status = 201
-            response.body = {
-                success: true,
-                data: product
-            }
-        } catch (err) {
-            response.status = 500
-            response.body = {
-                success: false,
-                msg: err.toString()
-            }
-        } finally {
-            await client.end()
-        }
-    }
-}
-
-// @desc    Update product
-// @route   PUT /api/v1/products/:id
-const updateProduct = async({ params, request, response }: { params: { id: string }, request: any, response: any }) => {
-    await getProduct({ params: { "id": params.id }, response })
-
-    if(response.status === 404) {
-        response.body = {
-            success: false,
-            msg: response.body.msg
-        }
-        response.status = 404
-        return
-    } else {
-        const body =  await request.body()
-        const product = body.value
-
-        if (!request.hasBody) {
-            response.status = 400
-            response.body = {
-                success: false,
-                msg: 'No data'
-            }
-        } else {
-            try {
-                await client.connect()
-    
-                const result = await client.query("UPDATE products SET name=$1, description=$2, price=$3 WHERE id=$4", 
-                product.name, 
-                product.description, 
-                product.price,
-                params.id)
-    
-                response.status = 200
-                response.body = {
-                    success: true,
-                    data: product
-                }
-            } catch (err) {
-                response.status = 500
-                response.body = {
-                    success: false,
-                    msg: err.toString()
-                }
-            } finally {
-                await client.end()
-            }
-        }
-    }
-}
-
-// @desc    Delete product
-// @route   DELETE /api/v1/products/:id
-const deleteProduct = async ({ params, response }: { params: { id: string }, response: any }) => {
-    await getProduct({ params: { "id": params.id }, response })
-
-    if(response.status === 404) {
-        response.body = {
-            success: false,
-            msg: response.body.msg
-        }
-        response.status = 404
-        return
-    } else {
-        try {
-            await client.connect()
-
-            const result = await client.query("DELETE FROM products WHERE id=$1", params.id)
-
-            response.body = {
-                success: true,
-                msg: `Product with id ${params.id} has been deleted`
-            }
-            response.status = 204
-        } catch (err) {
-            response.status = 500
-                response.body = {
-                    success: false,
-                    msg: err.toString()
-                }
-        } finally {
-            await client.end()
-        }
-    }
-}
-
-export { getProducts, getProduct, addProduct, updateProduct, deleteProduct }
+export default {
+  getProducts,
+  getProduct,
+  addProduct,
+  updateProduct,
+  deleteProduct,
+};
